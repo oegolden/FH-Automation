@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  fh-automation:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fh-automation
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - API_KEY=${API_KEY}
+      - FIREHYDRANT_API_KEY=${FIREHYDRANT_API_KEY}
+      - ZENDESK_API_KEY=${ZENDESK_API_KEY}
+      - Slack_BOT_TOKEN=${Slack_BOT_TOKEN}
+    env_file:
+      - .env
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

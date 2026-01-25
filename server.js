@@ -1,25 +1,35 @@
 const express = require("express");
 const dotenv = require("dotenv");
 const { WebClient, LogLevel } = require("@slack/web-api");
+const apiKeyAuth = require("./middleware/apiKeyAuth");
+const { generalLimiter, messagingLimiter } = require("./middleware/rateLimiter");
 dotenv.config();
 
 const app = express();
 app.use(express.json());
 
+// Apply API key authentication middleware to all endpoints
+app.use(apiKeyAuth);
+
+// Apply general rate limiting to all routes
+app.use(generalLimiter);
+
 const FIREHYDRANT_API_KEY = process.env.FIREHYDRANT_API_KEY;
-const FIREHYDRANT_API_BASE = "https://api.firehydrant.io/v1";
+const FIREHYDRANT_API_BASE = process.env.FIREHYDRANT_API_BASE;
 const ZENDESK_API_KEY = process.env.ZENDESK_API_KEY;
-const ZENDESK_EMAIL = "jwehrle@auditboard.com";
-const ZENDESK_SUBDOMAIN = "soxhub1753473789";
+const ZENDESK_EMAIL = process.env.ZENDESK_EMAIL;
+const ZENDESK_SUBDOMAIN = process.env.ZENDESK_SUBDOMAIN;
 const SLACK_BOT_TOKEN = process.env.Slack_BOT_TOKEN;
+//zendesk auth specifically
 const auth = Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_API_KEY}`).toString('base64');
 
+//declaring webclient for slackk bot
 const client = new WebClient(SLACK_BOT_TOKEN, {
   // LogLevel can be imported and used to make debugging simpler
   logLevel: LogLevel.DEBUG
 });
 
-// --- Helper: call FireHydrant API ---
+//helper for fh requests since we do a lot
 async function fhRequest(endpoint, method = "GET", body = null) {
   const res = await fetch(`${FIREHYDRANT_API_BASE}${endpoint}`, {
     method,
@@ -37,48 +47,6 @@ async function fhRequest(endpoint, method = "GET", body = null) {
 
   return res.json();
 }
-
-// --- Main route ---
-app.post("/attach-status-page", async (req, res) => {
-  try {
-    const { incident_id, company_name, incident_title } = req.body;
-    if (!incident_id || !company_name) {
-      return res.status(400).json({ error: "incident_id and company_name are required." });
-    }
-    const cleaned_name = company_name.replace(/\s/g, ''); 
-    console.log(`Attaching status page '${cleaned_name}' to incident ${incident_id}`);
-    // 1️⃣ Get all FireHydrant status pages
-    let data = await fhRequest("/nunc_connections");
-    const pages = data.data;
-    console.log("Fetched status pages:", pages);
-    // 2️⃣ Find the one matching the company_name (by name)
-    const targetPage = pages.find(
-      p => p.company_name.toLowerCase() === cleaned_name.toLowerCase()
-    );
-
-    if (!targetPage) {
-      return res.status(404).json({ error: `No status page found with name '${cleaned_name}'.` });
-    }
-
-    // 4️⃣ Add the status page to the incident
-    const attachBody = {
-      integration_slug: "nunc",
-      integration_id: targetPage.id,
-      title: `${incident_title}`,
-    };
-    console.log("Attaching status page with body:", attachBody);
-    const result = await fhRequest(`/incidents/${incident_id}/status_pages`, "POST", attachBody);
-
-    return res.status(201).json({
-      message: `Status page '${targetPage.name}' linked to incident ${incident_id}`,
-      result
-    });
-
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: err.message });
-  }
-});
 
 
 // --- Push Update to Zendesk Ticket ---
@@ -193,8 +161,8 @@ async function publishMessage(id, text) {
   }
 }
 
-
-app.post("/send-update-message", async (req, res) => {
+//send ai summary message to ticket owner through slack
+app.post("/send-update-message", messagingLimiter, async (req, res) => {
   try {
     //iterate over ticket ids and get owner id for each ticket
     var { ticket_ids, updateBody } = req.body;
@@ -220,6 +188,7 @@ app.post("/send-update-message", async (req, res) => {
             }
           );
             const owner_id = slack_response.user.id;
+            //send messange to each owner of the ticket
             await publishMessage(owner_id, updateBody);
         } catch (error) {
           await publishMessage("U09DZTJGRBJ", updateBody); //fallback to otis user id for presentation on 12/5/2025
