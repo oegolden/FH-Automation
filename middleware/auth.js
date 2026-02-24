@@ -9,7 +9,7 @@
 
 const crypto = require('crypto');
 
-const apiKeyAuth = (req, res, next) => {
+const auth = (req, res, next) => {
   // Get the signature from the request headers
   const signature = req.headers["fh-signature"];
 
@@ -31,8 +31,8 @@ const apiKeyAuth = (req, res, next) => {
     });
   }
 
-  // Get the raw request body
-  const data = JSON.stringify(req.body);
+  // Get the raw request body (must be the original raw bytes)
+  const data = req.rawBody || '';
 
   // Calculate expected signature using HMAC SHA256
   const expectedSignature = crypto
@@ -42,6 +42,7 @@ const apiKeyAuth = (req, res, next) => {
 
   // Validate the provided signature
   if (signature !== expectedSignature) {
+    console.log(signature);
     return res.status(403).json({
       error: "Forbidden",
       message: "Invalid signature."
@@ -52,4 +53,4 @@ const apiKeyAuth = (req, res, next) => {
   next();
 };
 
-module.exports = apiKeyAuth;
+module.exports = auth;
