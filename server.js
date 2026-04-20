@@ -31,14 +31,31 @@ const FIREHYDRANT_API_BASE = process.env.FIREHYDRANT_API_BASE;
 
 //helper for fh requests since we do a lot
 async function fhRequest(endpoint, method = "GET", body = null) {
-  const res = await fetch(`${FIREHYDRANT_API_BASE}${endpoint}`, {
-    method,
-    headers: {
-      "Authorization": `${FIREHYDRANT_API_KEY}`,
-      "Content-Type": "application/json"
-    },
-    body: body ? JSON.stringify(body) : undefined
-  });
+  const baseUrl = (FIREHYDRANT_API_BASE || "").replace(/\/+$/, "");
+  const cleanEndpoint = `/${String(endpoint || "").replace(/^\/+/, "")}`;
+  const requestUrl = `${baseUrl}${cleanEndpoint}`;
+
+  if (!baseUrl) {
+    throw new Error("FIREHYDRANT_API_BASE is not set in environment variables");
+  }
+
+  let res;
+  try {
+    res = await fetch(requestUrl, {
+      method,
+      headers: {
+        "Authorization": `${FIREHYDRANT_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: body ? JSON.stringify(body) : undefined
+    });
+  } catch (err) {
+    const causeCode = err && err.cause ? err.cause.code : undefined;
+    const tlsHint = causeCode && String(causeCode).includes("ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE")
+      ? " TLS handshake failed; verify FIREHYDRANT_API_BASE points to the correct HTTPS host and that outbound TLS inspection/proxy settings are valid."
+      : "";
+    throw new Error(`Failed to reach FireHydrant at ${requestUrl}.${tlsHint} Original error: ${err.message}`);
+  }
 
   if (!res.ok) {
     const text = await res.text();

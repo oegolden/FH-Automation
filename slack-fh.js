@@ -14,14 +14,31 @@ const client = new WebClient(process.env.Slack_BOT_TOKEN, {
 });
 
 async function fhRequest(endpoint, method = "GET", body = null) {
-    const res = await fetch(`${process.env.FIREHYDRANT_API_BASE}${endpoint}`, {
-        method,
-        headers: {
-            "Authorization": `${process.env.FIREHYDRANT_API_KEY}`,
-            "Content-Type": "application/json"
-        },
-        body: body ? JSON.stringify(body) : undefined
-    });
+    const baseUrl = (process.env.FIREHYDRANT_API_BASE || "").replace(/\/+$/, "");
+    const cleanEndpoint = `/${String(endpoint || "").replace(/^\/+/, "")}`;
+    const requestUrl = `${baseUrl}${cleanEndpoint}`;
+
+    if (!baseUrl) {
+        throw new Error("FIREHYDRANT_API_BASE is not set in environment variables");
+    }
+
+    let res;
+    try {
+        res = await fetch(requestUrl, {
+            method,
+            headers: {
+                "Authorization": `${process.env.FIREHYDRANT_API_KEY}`,
+                "Content-Type": "application/json"
+            },
+            body: body ? JSON.stringify(body) : undefined
+        });
+    } catch (err) {
+        const causeCode = err && err.cause ? err.cause.code : undefined;
+        const tlsHint = causeCode && String(causeCode).includes("ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE")
+            ? " TLS handshake failed; verify FIREHYDRANT_API_BASE points to the correct HTTPS host and that outbound TLS inspection/proxy settings are valid."
+            : "";
+        throw new Error(`Failed to reach FireHydrant at ${requestUrl}.${tlsHint} Original error: ${err.message}`);
+    }
 
     if (!res.ok) {
         const text = await res.text();
@@ -36,10 +53,17 @@ async function getCleanedIncidentSummary(incident_id) {
         throw new Error("FIREHYDRANT_AUDIENCE_ID is not set in environment variables");
     }
 
-    console.log(`Fetching summary for Audience ID: ${process.env.FIREHYDRANT_AUDIENCE_ID} and Incident ID: ${incident_id}`);
+    const audienceId = process.env.FIREHYDRANT_AUDIENCE_ID.trim().replace(/^\/+|\/+$/g, "");
+    const cleanIncidentId = String(incident_id || "").trim().replace(/^\/+|\/+$/g, "");
+
+    if (!cleanIncidentId) {
+        throw new Error("incident_id is required");
+    }
+
+    console.log(`Fetching summary for Audience ID: ${audienceId} and Incident ID: ${cleanIncidentId}`);
 
     try {
-        const endpoint = `/audiences/${process.env.FIREHYDRANT_AUDIENCE_ID}/summaries/${incident_id}`;
+        const endpoint = `/audiences/${encodeURIComponent(audienceId)}/summaries/${encodeURIComponent(cleanIncidentId)}`;
         console.log(`Requesting FH Endpoint: ${endpoint}`);
         const response = await fhRequest(endpoint);
 
